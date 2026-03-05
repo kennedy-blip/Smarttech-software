@@ -1,27 +1,42 @@
+import re
+
 class HardwareDiagnostics:
     @staticmethod
     def get_battery_report(device):
-        """Pulls deep battery telemetry."""
-        raw_data = device.shell("dumpsys battery")
-        
-        # Parse the raw text into a dictionary
-        stats = {}
-        for line in raw_data.splitlines():
-            if ":" in line:
-                key, value = line.split(":", 1)
-                stats[key.strip()] = value.strip()
-        
-        # Logic to determine health status
-        level = stats.get("level", "0")
-        health_code = stats.get("health", "1")
-        
-        # Health codes: 2 = Good, 3 = Overheat, 4 = Dead, 5 = Overvoltage
-        health_map = {"2": "Good", "3": "Overheat", "4": "Degraded", "5": "Voltage Issue"}
-        health_str = health_map.get(health_code, "Unknown")
-        
-        return {
-            "Level": f"{level}%",
-            "Status": health_str,
-            "Temp": f"{int(stats.get('temperature', 0)) / 10}°C",
-            "Cycles": stats.get("counter", "N/A") # Cycle count on supported kernels
-        }
+        """Fetches and parses real-time battery data from the device."""
+        try:
+            # Get raw dump from the Android system
+            raw_data = device.shell("dumpsys battery")
+            
+            # Use Regex to find values (handles different spacing/formats)
+            level = re.search(r'level:\s+(\d+)', raw_data)
+            health = re.search(r'health:\s+(\d+)', raw_data)
+            temp = re.search(r'temperature:\s+(\d+)', raw_data)
+            voltage = re.search(r'voltage:\s+(\d+)', raw_data)
+
+            # Convert Android Health ID to Human Readable Text
+            health_map = {
+                1: "Unknown",
+                2: "Good",
+                3: "Overheating",
+                4: "Dead",
+                5: "Over Voltage",
+                6: "Unspecified Failure",
+                7: "Cold"
+            }
+
+            # Parse temperature (Android returns it in tenths of a degree, e.g., 350 = 35.0°C)
+            temp_val = int(temp.group(1)) / 10 if temp else 0
+            
+            # Parse voltage (Android returns it in millivolts, e.g., 4200 = 4.2V)
+            volt_val = int(voltage.group(1)) / 1000 if voltage else 0
+
+            return {
+                "level": level.group(1) if level else "0",
+                "health": health_map.get(int(health.group(1)), "Unknown") if health else "Unknown",
+                "temp": f"{temp_val:.1f}",
+                "voltage": f"{volt_val:.2f}"
+            }
+        except Exception as e:
+            print(f"Diag Error: {e}")
+            return None
