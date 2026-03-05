@@ -1,0 +1,6 @@
+PyQt6
+pure-python-adb
+pandas
+openpyxl
+psutil
+requests

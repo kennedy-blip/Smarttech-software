@@ -1,0 +1,29 @@
+# --- Python Environment ---
+venv/
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- PyInstaller / Build Files ---
+# We don't want to upload the temporary build files
+build/
+dist/
+*.spec
+
+# --- ADB Binaries ---
+# Usually, we don't upload adb.exe because it's a third-party tool, 
+# but if you want it included for others, you can comment this out.
+bin/
+
+# --- User Data & Logs ---
+# Don't upload customer data or PDF reports!
+logs/
+smarttech_backups/
+*.pdf
+*.log
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+.DS_Store (for Mac users)
