@@ -1,143 +1,100 @@
 import sys
-import os
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
-
-# Path handling for PyInstaller bundling
-if getattr(sys, 'frozen', False):
-    sys.path.append(sys._MEIPASS)
 
 from gui.main_window import SmartTechGUI
 from gui.package_view import PackageDialog
 from core.android_tools import AndroidRepairEngine
-from core.malware_scan import MalwareScanner
-from core.advanced_ops import AdvancedOperations
-from core.history_manager import RepairHistory
+from core.advanced_ops import AdvancedOperations, FRPUnlocker
 from core.diagnostics import HardwareDiagnostics
-from core.frp_tools import FRPUnlocker
-from core.backup_manager import BackupManager
 from core.package_manager import PackageManager
+from core.backup_manager import BackupManager
 
 class SmartTechApp:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.window = SmartTechGUI()
         
-        # Core Logic Modules
+        # Engines
         self.engine = AndroidRepairEngine()
-        self.scanner = MalwareScanner()
         self.ops = AdvancedOperations()
-        self.history = RepairHistory()
         self.diag = HardwareDiagnostics()
-        self.backup_mgr = BackupManager()
         self.pkg_mgr = PackageManager()
+        self.backup_mgr = BackupManager()
         
-        self.actions_performed = []
         self.current_device = None
 
-        # Signals
-        self.window.request_scan.connect(self.run_malware_scan)
-        self.window.request_clean.connect(self.run_cleaner)
+        # Link GUI to Functions
+        self.window.request_packages.connect(self.run_pkgs)
+        self.window.request_diag.connect(self.run_diag)
         self.window.request_backup.connect(self.run_backup)
-        self.window.request_frp.connect(self.run_frp_bypass)
-        self.window.request_reset.connect(self.run_factory_reset)
-        self.window.request_diag.connect(self.run_diagnostics)
-        self.window.request_packages.connect(self.run_package_manager)
-        self.window.request_report.connect(self.generate_report)
+        self.window.request_clean.connect(self.run_clean)
+        self.window.request_frp.connect(self.run_frp)
+        self.window.request_reset.connect(self.run_reset)
+        self.window.request_note.connect(self.run_note)
+        self.window.request_push.connect(self.run_push)
 
-        # Connection polling
+        # Polling Timer
         self.timer = QTimer()
-        self.timer.timeout.connect(self.check_connection)
-        self.timer.start(3000)
+        self.timer.timeout.connect(self.check_conn)
+        self.timer.start(2000)
 
-    def check_connection(self):
-        devices = self.engine.get_devices()
-        if devices:
-            if not self.current_device or self.current_device.serial != devices[0].serial:
-                self.current_device = devices[0]
-                self.window.status_label.setText(f"ONLINE: {self.current_device.serial}")
-                self.window.status_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #a6e3a1;")
-                self.window.log(f"Device connected: {self.current_device.serial}")
+    def check_conn(self):
+        devs = self.engine.get_devices()
+        if devs:
+            if not self.current_device or self.current_device.serial != devs[0].serial:
+                self.current_device = devs[0]
+                info = self.engine.get_device_info(self.current_device)
+                self.window.lbl_model.setText(f"Model: {info['model']} (V{info['version']})")
+                self.window.lbl_status.setText("ONLINE")
+                self.window.lbl_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+                self.window.log(f"Connected: {info['model']}")
         else:
-            self.current_device = None
-            self.window.status_label.setText("DISCONNECTED")
-            self.window.status_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #f38ba8;")
+            if self.current_device:
+                self.current_device = None
+                self.window.lbl_model.setText("Model: Waiting for Device...")
+                self.window.lbl_status.setText("OFFLINE")
+                self.window.lbl_status.setStyleSheet("color: #f38ba8; font-weight: bold;")
 
-    def run_package_manager(self):
-        """Safe execution of the App Manager to prevent software crashes."""
-        if not self.current_device:
-            self.window.log("Error: Connect a device first.")
-            return
-        
-        try:
-            self.window.log("Fetching package list...")
-            # Get list from package manager
+    def run_diag(self):
+        if self.current_device:
+            d = self.diag.get_battery_report(self.current_device)
+            if d: self.window.update_battery_ui(d['level'], d['health'], d['temp'])
+
+    def run_pkgs(self):
+        if self.current_device:
             pkgs = self.pkg_mgr.get_installed_packages(self.current_device)
-            
-            # Show Dialog
             dialog = PackageDialog(pkgs, self.window)
             if dialog.exec():
-                selected = dialog.get_selected_packages()
-                if not selected:
-                    self.window.log("No apps selected.")
-                    return
-                
-                self.window.log(f"Starting removal of {len(selected)} apps...")
-                for p in selected:
-                    if self.pkg_mgr.uninstall_package(self.current_device, p):
-                        self.window.log(f"Successfully uninstalled: {p}")
-                    else:
-                        self.window.log(f"Failed to remove: {p}")
-                
-                self.actions_performed.append(f"Bloatware Removal: {len(selected)} apps")
-        
-        except Exception as e:
-            # This captures any error and prevents the app from closing
-            self.window.log(f"CRITICAL ERROR in App Manager: {str(e)}")
-            print(f"Debug Info: {e}")
+                for p in dialog.get_selected_packages():
+                    self.pkg_mgr.uninstall_package(self.current_device, p)
+                    self.window.log(f"Removed: {p}")
 
-    # --- Other Methods ---
-    def run_diagnostics(self):
-        if self.current_device:
-            self.window.log("Gathering hardware metrics...")
-            data = self.diag.get_battery_report(self.current_device)
-            self.window.update_diag_ui(data)
+    def run_frp(self):
+        if self.current_device: self.window.log(FRPUnlocker.bypass_setup_wizard(self.current_device))
 
-    def run_malware_scan(self):
+    def run_reset(self):
         if self.current_device:
-            self.window.log("Scanning system...")
-            results = self.scanner.scan_device(self.current_device)
-            self.window.log(f"Scan complete. {len(results['malware'])} threats.")
-            self.actions_performed.append("Security Scan")
+            if QMessageBox.warning(self.window, "Confirm", "Wipe all data?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+                self.window.log(self.ops.force_factory_reset(self.current_device))
 
-    def run_cleaner(self):
+    def run_note(self, text):
+        if self.current_device: self.window.log(self.ops.set_lock_screen_note(self.current_device, text))
+
+    def run_push(self, path):
         if self.current_device:
-            if self.engine.clear_all_cache(self.current_device):
-                self.window.log("Deep Clean Finished.")
-                self.actions_performed.append("System Optimization")
+            s, res = self.engine.push_file(self.current_device, path)
+            self.window.log(f"File Push {'Success' if s else 'Failed'}: {res}")
 
     def run_backup(self):
         if self.current_device:
             msg, _ = self.backup_mgr.backup_device(self.current_device.serial)
             self.window.log(msg)
-            self.actions_performed.append("Data Backup")
 
-    def run_frp_bypass(self):
+    def run_clean(self):
         if self.current_device:
-            msg = FRPUnlocker.bypass_setup_wizard(self.current_device)
-            self.window.log(msg)
-            self.actions_performed.append("FRP Bypass")
-
-    def run_factory_reset(self):
-        if self.current_device:
-            msg = self.ops.force_factory_reset(self.current_device)
-            self.window.log(msg)
-            self.actions_performed.append("Factory Reset")
-
-    def generate_report(self):
-        if self.current_device:
-            path = self.history.generate_pdf_report(self.current_device.serial, self.actions_performed)
-            self.window.log(f"Report saved: {path}")
+            self.engine.clear_all_cache(self.current_device)
+            self.window.log("Cache Cleaned.")
 
     def run(self):
         self.window.show()
